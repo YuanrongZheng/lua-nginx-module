@@ -43,6 +43,7 @@ static int ngx_http_lua_ngx_md5_bin(lua_State *L);
 
 #if (NGX_HAVE_SHA1)
 static int ngx_http_lua_ngx_sha1_bin(lua_State *L);
+static int ngx_http_lua_ngx_sha1(lua_State *L);
 #endif
 
 static int ngx_http_lua_ngx_decode_base64(lua_State *L);
@@ -53,6 +54,7 @@ static int ngx_http_lua_ngx_encode_args(lua_State *L);
 static int ngx_http_lua_ngx_decode_args(lua_State *L);
 #if (NGX_OPENSSL)
 static int ngx_http_lua_ngx_hmac_sha1(lua_State *L);
+static int ngx_http_lua_ngx_hmac_sha1_hex(lua_State *L);
 #endif
 
 
@@ -89,6 +91,9 @@ ngx_http_lua_inject_string_api(lua_State *L)
 #if (NGX_HAVE_SHA1)
     lua_pushcfunction(L, ngx_http_lua_ngx_sha1_bin);
     lua_setfield(L, -2, "sha1_bin");
+
+    lua_pushcfunction(L, ngx_http_lua_ngx_sha1);
+    lua_setfield(L, -2, "sha1");
 #endif
 
     lua_pushcfunction(L, ngx_http_lua_ngx_crc32_short);
@@ -100,6 +105,9 @@ ngx_http_lua_inject_string_api(lua_State *L)
 #if (NGX_OPENSSL)
     lua_pushcfunction(L, ngx_http_lua_ngx_hmac_sha1);
     lua_setfield(L, -2, "hmac_sha1");
+
+    lua_pushcfunction(L, ngx_http_lua_ngx_hmac_sha1_hex);
+    lua_setfield(L, -2, "hmac_sha1_hex");
 #endif
 }
 
@@ -423,6 +431,41 @@ ngx_http_lua_ngx_sha1_bin(lua_State *L)
 
     return 1;
 }
+
+static int
+ngx_http_lua_ngx_sha1(lua_State *L)
+{
+    u_char                  *src;
+    size_t                   slen;
+
+    ngx_sha1_t               sha;
+    u_char                   sha_buf[SHA_DIGEST_LENGTH];
+    u_char                   hex_buf[2 * sizeof(sha_buf)];
+
+    if (lua_gettop(L) != 1) {
+        return luaL_error(L, "expecting one argument");
+    }
+
+    if (lua_isnil(L, 1)) {
+        src     = (u_char *) "";
+        slen    = 0;
+
+    } else {
+        src = (u_char *) luaL_checklstring(L, 1, &slen);
+    }
+
+    dd("slen: %d", (int) slen);
+
+    ngx_sha1_init(&sha);
+    ngx_sha1_update(&sha, src, slen);
+    ngx_sha1_final(sha_buf, &sha);
+
+    ngx_hex_dump(hex_buf, sha_buf, sizeof(sha_buf));
+
+    lua_pushlstring(L, (char *) hex_buf, sizeof(hex_buf));
+
+    return 1;
+}
 #endif
 
 
@@ -640,6 +683,35 @@ ngx_http_lua_ngx_hmac_sha1(lua_State *L)
     HMAC(evp_md, sec, lsec, sts, lsts, md, &md_len);
 
     lua_pushlstring(L, (char *) md, md_len);
+
+    return 1;
+}
+
+static int
+ngx_http_lua_ngx_hmac_sha1_hex(lua_State *L)
+{
+    u_char                  *sec, *sts;
+    size_t                   lsec, lsts;
+    unsigned int             md_len;
+    u_char                   md[EVP_MAX_MD_SIZE];
+    u_char                   hex_buf[2 * sizeof(md)];
+    const EVP_MD            *evp_md;
+
+    if (lua_gettop(L) != 2) {
+        return luaL_error(L, "expecting one argument, but got %d",
+                          lua_gettop(L));
+    }
+
+    sec = (u_char *) luaL_checklstring(L, 1, &lsec);
+    sts = (u_char *) luaL_checklstring(L, 2, &lsts);
+
+    evp_md = EVP_sha1();
+
+    HMAC(evp_md, sec, lsec, sts, lsts, md, &md_len);
+
+    ngx_hex_dump(hex_buf, md, md_len);
+
+    lua_pushlstring(L, (char *) hex_buf, md_len * 2);
 
     return 1;
 }
